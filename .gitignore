@@ -1,2 +1,12 @@
-target
-.envrc
+**/*.rs.bk
+*.pdb
+.idea/
+.vscode/
+debug/
+target/
+temp/
+tmp/
+venv/
+
+# FIXME: This is a library, we may consider removing the lock file
+#Cargo.lock
