@@ -167,9 +167,11 @@ dependencies = [
 name = "can-embedded"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "arbitrary",
  "bitvec",
  "can-messages",
+ "dbc-codegen",
  "defmt",
  "embedded-can",
 ]
@@ -302,7 +304,6 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "can-dbc",
- "defmt",
  "embedded-can",
  "heck",
  "typed-builder",

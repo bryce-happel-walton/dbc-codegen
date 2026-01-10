@@ -1,30 +1,11 @@
-//! CAN DBC code generator for Rust
-//!
-//! DBC files are descriptions of CAN frames.
-//! See [this post](https://www.kvaser.com/developer-blog/an-introduction-j1939-and-dbc-files/)
-//! for an introduction.
-//!
-//! # Usage
-//!
-//! Create a [Config] and pass it to [codegen] along with the contents of a DBC-file.
-//! See [Config] docs for a complete list of options.
-//!
-//! ```
-//! use dbc_codegen::{codegen, Config, FeatureConfig};
-//!
-//! let config = Config::builder()
-//!     .dbc_name("example.dbc")
-//!     .dbc_content(include_str!("../testing/dbc-examples/example.dbc"))
-//!     //.impl_arbitrary(FeatureConfig::Gated("arbitrary")) // optional
-//!     //.impl_debug(FeatureConfig::Always)                 // optional
-//!     .build();
-//!
-//! let mut out = Vec::<u8>::new();
-//! codegen(config, &mut out).unwrap();
-//! ```
-
 #![deny(missing_docs)]
 #![deny(clippy::arithmetic_side_effects)]
+#![allow(clippy::needless_doctest_main)]
+#![cfg_attr(feature = "std", doc = include_str!("../README.md"))]
+#![cfg_attr(
+    not(feature = "std"),
+    doc = "Documentation is only available with the `std` feature."
+)]
 
 use std::cmp::{max, min};
 use std::collections::{BTreeMap, BTreeSet};
@@ -41,6 +22,17 @@ mod includes;
 mod keywords;
 mod pad;
 
+static ALLOW_DEADCODE: &str = "#[allow(dead_code)]";
+static ALLOW_LINTS: &str = r"#[allow(
+    clippy::absurd_extreme_comparisons,
+    clippy::excessive_precision,
+    clippy::manual_range_contains,
+    clippy::unnecessary_cast,
+    clippy::useless_conversion,
+    unused_comparisons,
+    unused_variables,
+)]";
+
 /// Code generator configuration. See module-level docs for an example.
 #[derive(TypedBuilder)]
 #[non_exhaustive]
@@ -48,7 +40,7 @@ pub struct Config<'a> {
     /// Name of the dbc-file. Used for generated docs only.
     pub dbc_name: &'a str,
 
-    /// Raw bytes of a dbc-file.
+    /// Content of a dbc-file as a UTF-8 string. Use [can_dbc::decode_cp1252] or other encodings if needed.
     pub dbc_content: &'a str,
 
     /// Optional: Print debug info to stdout while generating code. Default: `false`.
@@ -108,7 +100,7 @@ pub enum FeatureConfig<'a> {
 
 /// Write Rust structs matching DBC input description to `out` buffer
 pub fn codegen(config: Config<'_>, out: impl Write) -> Result<()> {
-    let dbc = can_dbc::Dbc::try_from(config.dbc_content).map_err(|e| {
+    let dbc = Dbc::try_from(config.dbc_content).map_err(|e| {
         let msg = "Could not parse dbc file";
         if config.debug_prints {
             anyhow!("{msg}: {e:#?}")
@@ -122,34 +114,19 @@ pub fn codegen(config: Config<'_>, out: impl Write) -> Result<()> {
     let mut w = BufWriter::new(out);
 
     writeln!(&mut w, "// Generated code!")?;
+    writeln!(&mut w, "//")?;
     writeln!(
         &mut w,
-        "#![allow(unused_comparisons, unreachable_patterns, unused_imports)]"
-    )?;
-    if config.allow_dead_code {
-        writeln!(&mut w, "#![allow(dead_code)]")?;
-    }
-    writeln!(&mut w, "#![allow(clippy::let_and_return, clippy::eq_op)]")?;
-    writeln!(
-        &mut w,
-        "#![allow(clippy::useless_conversion, clippy::unnecessary_cast)]"
-    )?;
-    writeln!(
-        &mut w,
-        "#![allow(clippy::excessive_precision, clippy::manual_range_contains, clippy::absurd_extreme_comparisons, clippy::too_many_arguments)]"
-    )?;
-    writeln!(&mut w, "#![deny(clippy::arithmetic_side_effects)]")?;
-    writeln!(&mut w)?;
-    writeln!(
-        &mut w,
-        "//! Message definitions from file `{:?}`",
+        "// Message definitions from file `{}`",
         config.dbc_name
     )?;
-    writeln!(&mut w, "//!")?;
-    writeln!(&mut w, "//! - Version: `{:?}`", dbc.version)?;
+    writeln!(&mut w, "// Version: {}", dbc.version.0)?;
     writeln!(&mut w)?;
+    writeln!(&mut w, "#[allow(unused_imports)]")?;
     writeln!(&mut w, "use core::ops::BitOr;")?;
+    writeln!(&mut w, "#[allow(unused_imports)]")?;
     writeln!(&mut w, "use bitvec::prelude::*;")?;
+    writeln!(&mut w, "#[allow(unused_imports)]")?;
     writeln!(&mut w, "use embedded_can::{{Id, StandardId, ExtendedId}};")?;
 
     config.impl_arbitrary.fmt_cfg(&mut w, |w| {
@@ -190,6 +167,8 @@ fn render_dbc(mut w: impl Write, config: &Config<'_>, dbc: &Dbc) -> Result<()> {
 
 fn render_root_enum(mut w: impl Write, dbc: &Dbc, config: &Config<'_>) -> Result<()> {
     writeln!(w, "/// All messages")?;
+    writeln!(w, "{ALLOW_LINTS}")?;
+    config.write_allow_dead_code(&mut w)?;
     writeln!(w, "#[derive(Clone)]")?;
     config.impl_debug.fmt_attr(&mut w, "derive(Debug)")?;
     config
@@ -208,6 +187,8 @@ fn render_root_enum(mut w: impl Write, dbc: &Dbc, config: &Config<'_>) -> Result
     writeln!(&mut w, "}}")?;
     writeln!(&mut w)?;
 
+    writeln!(w, "{ALLOW_LINTS}")?;
+    config.write_allow_dead_code(&mut w)?;
     writeln!(w, "impl Messages {{")?;
     {
         let mut w = PadAdapter::wrap(&mut w);
@@ -275,6 +256,8 @@ fn render_message(mut w: impl Write, config: &Config<'_>, msg: &Message, dbc: &D
     writeln!(w, "}}")?;
     writeln!(w)?;
 
+    writeln!(w, "{ALLOW_LINTS}")?;
+    config.write_allow_dead_code(&mut w)?;
     writeln!(w, "impl {} {{", type_name(&msg.name))?;
     {
         let mut w = PadAdapter::wrap(&mut w);
@@ -954,6 +937,8 @@ fn write_enum(
     let signal_rust_type = signal_to_rust_type(signal);
 
     writeln!(w, "/// Defined values for {}", signal.name)?;
+    writeln!(w, "{ALLOW_LINTS}")?;
+    config.write_allow_dead_code(&mut w)?;
     writeln!(w, "#[derive(Clone, Copy, PartialEq)]")?;
     config.impl_debug.fmt_attr(&mut w, "derive(Debug)")?;
     config
@@ -1260,7 +1245,7 @@ fn render_embedded_can_frame(
     w: &mut impl Write,
     config: &Config<'_>,
     msg: &Message,
-) -> Result<(), std::io::Error> {
+) -> io::Result<()> {
     config.impl_embedded_can_frame.fmt_cfg(w, |w| {
         writeln!(
             w,
@@ -1421,6 +1406,8 @@ fn render_multiplexor_enums(
     }
 
     writeln!(w, "/// Defined values for multiplexed signal {}", msg.name)?;
+    writeln!(w, "{ALLOW_LINTS}")?;
+    config.write_allow_dead_code(&mut w)?;
 
     config.impl_debug.fmt_attr(&mut w, "derive(Debug)")?;
     config
@@ -1452,6 +1439,8 @@ fn render_multiplexor_enums(
     for (switch_index, multiplexed_signals) in &multiplexed_signals {
         let struct_name = multiplexed_enum_variant_name(msg, multiplexor_signal, *switch_index)?;
 
+        writeln!(w, "{ALLOW_LINTS}")?;
+        config.write_allow_dead_code(&mut w)?;
         config.impl_debug.fmt_attr(&mut w, "derive(Debug)")?;
         config
             .impl_defmt
@@ -1462,6 +1451,8 @@ fn render_multiplexor_enums(
         writeln!(w, "pub struct {struct_name} {{ raw: [u8; {}] }}", msg.size)?;
         writeln!(w)?;
 
+        writeln!(w, "{ALLOW_LINTS}")?;
+        config.write_allow_dead_code(&mut w)?;
         writeln!(w, "impl {struct_name} {{")?;
 
         writeln!(
@@ -1488,6 +1479,8 @@ fn render_arbitrary(mut w: impl Write, config: &Config<'_>, msg: &Message) -> Re
         FeatureConfig::Never => return Ok(()),
     }
 
+    writeln!(w, "{ALLOW_LINTS}")?;
+    config.write_allow_dead_code(&mut w)?;
     writeln!(
         w,
         "impl<'a> Arbitrary<'a> for {typ} {{",
@@ -1543,12 +1536,13 @@ fn render_error(mut w: impl Write, config: &Config<'_>) -> io::Result<()> {
     w.write_all(include_bytes!("./includes/errors.rs"))?;
 
     config.impl_error.fmt_cfg(w, |w| {
-        writeln!(w, "impl std::error::Error for CanError {{}}")
+        writeln!(w, "impl core::error::Error for CanError {{}}")
     })
 }
 
 fn render_arbitrary_helpers(mut w: impl Write, config: &Config<'_>) -> io::Result<()> {
     config.impl_arbitrary.fmt_cfg(&mut w, |w| {
+        config.write_allow_dead_code(w)?;
         writeln!(w, "trait UnstructuredFloatExt {{")?;
         writeln!(w, "    fn float_in_range(&mut self, range: core::ops::RangeInclusive<f32>) -> arbitrary::Result<f32>;")?;
         writeln!(w, "}}")?;
@@ -1607,6 +1601,16 @@ fn get_relevant_messages(dbc: &Dbc) -> impl Iterator<Item = &Message> {
 fn message_ignored(message: &Message) -> bool {
     // DBC internal message containing signals unassigned to any real message
     message.name == "VECTOR__INDEPENDENT_SIG_MSG"
+}
+
+impl Config<'_> {
+    fn write_allow_dead_code(&self, w: &mut impl Write) -> io::Result<()> {
+        if self.allow_dead_code {
+            writeln!(w, "{ALLOW_DEADCODE}")
+        } else {
+            Ok(())
+        }
+    }
 }
 
 impl FeatureConfig<'_> {
