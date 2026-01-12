@@ -3,6 +3,7 @@
 exclude: |
   (?x)^(
       .+\.(dbc|DBC)
+    | (.*/)?tests-snapshots.*/.*
   )$
 
 repos:
