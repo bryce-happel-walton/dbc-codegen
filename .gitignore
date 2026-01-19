@@ -10,6 +10,7 @@ temp/
 tmp/
 venv/
 tests-snapshots/opendbc/**/*.snap
+!tests-snapshots/opendbc/**/!error_*.snap
 tests-snapshots/opendbc/**/*.rs
 
 # FIXME: This is a library, we may consider removing the lock file

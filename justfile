@@ -78,7 +78,6 @@ ci-test-msrv:
 # Clean all build artifacts
 clean:
     cargo clean
-    rm -f Cargo.lock
 
 # Run cargo clippy to lint the code
 clippy *args:
