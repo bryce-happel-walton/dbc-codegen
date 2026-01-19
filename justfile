@@ -21,13 +21,14 @@ export RUST_BACKTRACE := env('RUST_BACKTRACE', if ci_mode == '1' {'1'} else {'0'
 # Run all tests and save its output as the new expected output.
 bless: bless-generate bless-compile
 
-# Run code generation tests and save its output as the new expected output
-bless-generate:  (cargo-install 'cargo-insta')
-    cargo insta test --accept --include-ignored --unreferenced=delete --all-features -- --skip compile_test
-
 # Compile generated code tests and save its output as the new expected output
 bless-compile:
     TRYBUILD=overwrite cargo test --all-features -- --test compile_test
+
+# Run code generation tests and save its output as the new expected output
+bless-generate:  (cargo-install 'cargo-insta')
+    rm -rf tests-snapshots
+    cargo insta test --accept --include-ignored --unreferenced=delete --all-features -- --skip compile_test
 
 # Generate all snapshots, including forced (.gitignore-d) ones
 bless-generate-all:
@@ -43,10 +44,19 @@ build-diagram:
     @echo "     npm install -g @mermaid-js/mermaid-cli"
     mmdc -i docs/diagram.mmd -o docs/diagram.svg
 
+# Test building for an embedded no_std target
+build-thumbv7em-none-eabihf:  (rustup-add-target 'thumbv7em-none-eabihf')
+    cargo build --package can-embedded --target thumbv7em-none-eabihf --no-default-features
+
 # Quick compile without building a binary
 check:
     cargo check --workspace --all-features --all-targets
     cargo check --workspace --no-default-features --all-targets
+
+check-msrv:  (rustup-add-target 'thumbv7em-none-eabihf')
+    cargo check --all-features
+    cargo check --no-default-features
+    cargo check --package can-embedded --target thumbv7em-none-eabihf --no-default-features
 
 # Generate code coverage report to upload to codecov.io
 ci-coverage: env-info && \
@@ -55,13 +65,13 @@ ci-coverage: env-info && \
     mkdir -p target/llvm-cov
 
 # Run all tests as expected by CI
-ci-test: env-info test-fmt check clippy test test-doc deny && assert-git-is-clean
+ci-test: env-info test-fmt build build-thumbv7em-none-eabihf clippy test test-doc deny && assert-git-is-clean
 
 # Run minimal subset of tests to ensure compatibility with MSRV
 ci-test-msrv:
     if [ ! -f Cargo.lock.bak ]; then  mv Cargo.lock Cargo.lock.bak ; fi
     cp Cargo.lock.msrv Cargo.lock
-    {{just}} env-info check test
+    {{just}} env-info check-msrv
     rm Cargo.lock
     mv Cargo.lock.bak Cargo.lock
 
@@ -123,7 +133,7 @@ msrv:  (cargo-install 'cargo-msrv')
 # Initialize Cargo.lock file with minimal versions of dependencies.
 msrv-init:  (cargo-install 'cargo-minimal-versions')
     rm -f Cargo.lock.msrv Cargo.lock
-    @if ! cargo minimal-versions check --workspace ; then \
+    @if ! cargo minimal-versions check ; then \
         echo "ERROR: Could not generate minimal Cargo.lock.msrv" ;\
         echo "       fix the lock file with 'cargo update ... --precise ...'" ;\
         echo "       make sure it passes 'just check' " ;\
@@ -200,4 +210,16 @@ cargo-install $COMMAND $INSTALL_CMD='' *args='':
             cargo binstall ${INSTALL_CMD:-$COMMAND} {{binstall_args}} --locked {{args}}
             { set +x; } 2>/dev/null
         fi
+    fi
+
+# Check if cargo target is already installed, and install if needed
+[private]
+rustup-add-target target:
+    #!/usr/bin/env sh
+    set -eu
+    if ! rustup target list --installed | grep -q {{quote(target)}}; then
+        echo "Adding target {{target}}"
+        rustup target add {{quote(target)}}
+    else
+        echo "Target {{target}} is already installed"
     fi
