@@ -776,7 +776,7 @@ fn signal_from_payload(w: &mut impl Write, signal: &Signal, msg: &Message) -> Re
     if signal.size == 1 {
         // inverted bit signal
         if signal.factor == -1.0 && signal.offset == 1.0 {
-            writeln!(&mut w, "signal == 0")?;
+            writeln!(w, "signal == 0")?;
         } else {
             writeln!(w, "signal == 1")?;
         }
