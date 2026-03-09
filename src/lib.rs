@@ -117,7 +117,6 @@ pub fn codegen(config: Config<'_>, out: impl Write) -> Result<()> {
     writeln!(w, "// Generated code!")?;
     writeln!(w, "//")?;
     writeln!(w, "// Message definitions from file `{}`", config.dbc_name)?;
-    writeln!(w, "// Version: {}", dbc.version.0)?;
     writeln!(w)?;
     writeln!(w, "#[allow(unused_imports)]")?;
     writeln!(w, "use core::ops::BitOr;")?;
@@ -133,6 +132,12 @@ pub fn codegen(config: Config<'_>, out: impl Write) -> Result<()> {
     config.impl_serde.fmt_cfg(&mut w, |w| {
         writeln!(w, "use serde::{{Serialize, Deserialize}};")
     })?;
+
+    writeln!(
+        w,
+        "\n#[allow(dead_code)]\npub const VERSION: &'static str = \"{}\";",
+        dbc.version.0
+    )?;
 
     writeln!(w)?;
 
@@ -776,7 +781,7 @@ fn signal_from_payload(w: &mut impl Write, signal: &Signal, msg: &Message) -> Re
     if signal.size == 1 {
         // inverted bit signal
         if signal.factor == -1.0 && signal.offset == 1.0 {
-            writeln!(&mut w, "signal == 0")?;
+            writeln!(w, "signal == 0")?;
         } else {
             writeln!(w, "signal == 1")?;
         }
